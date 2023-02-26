@@ -1,11 +1,24 @@
+from typing import Any
+from parser.parser import Scanner, Parser
 import re
-from typing import Any, Optional
+import graphlib
 
 
 class Cell:
-    def __init__(self, value=None, formula=None):
+    def __init__(self, column_index: str, row_index: str, value=None, formula=None):
+        self.column_index = column_index
+        self.row_index = row_index
         self.value = value
+
         self.formula = formula
+        self.dependencies = self.get_fomula_deps()
+
+    def get_fomula_deps(self):
+        return (
+            [col + row for col, row in self.extract_formula_deps()]
+            if self.formula
+            else []
+        )
 
     def calculate(self, cells: list["Row"]):
         if self.value is not None:
@@ -14,22 +27,29 @@ class Cell:
             return self.eval_formula(cells)
         return None
 
-    def eval_formula(self, rows: list["Row"]) -> None:
-        # Define a regular expression pattern to match cell references
-        cell_ref_pattern = re.compile(r"([A-Za-z]+)(\d+)")
+    def update_formula(self, new_formula: str) -> None:
+        self.formula = new_formula
+        self.dependencies = self.get_fomula_deps()
 
-        # Replace cell references with their corresponding values
-        def replace_cell_ref(match):
-            col = match.group(1)
-            row = int(match.group(2))
-            return rows[row - 1][ord(col.upper()) - 65].value
+    def eval_formula(self, worksheet: "Sheet") -> None:
+        tokens = Scanner(self.formula)
+        parse_tree = Parser(tokens).parse()
 
-        formula = cell_ref_pattern.sub(replace_cell_ref, self.formula)
-        return formula
+        dependency_graph = self.build_dependency_graph(worksheet)
+        parse_tree.eval(dependency_graph=dependency_graph)
+
+    def extract_formula_deps(self) -> list[str]:
+        regex = re.compile("([A-Za-z]+)(\d+)")
+        result = regex.findall(self.formula)
+        return result
+
+    def has_dependencies(self) -> bool:
+        return len(self.dependencies) > 0
 
 
 class Row:
-    def __init__(self, cells=None):
+    def __init__(self, row_index: int, cells=None):
+        self.row_index = row_index
         self.cells: list[Cell] = cells or []
 
     def add_cell(self, cell: Cell):
@@ -42,12 +62,13 @@ class Row:
         return self.get_cell(index)
 
     def __str__(self) -> str:
-        values = [c.value for c in self.cells]
-        return f"[{','.join(values)}]"
+        values = [c.value or "" for c in self.cells]
+        return f"[{', '.join(values)}]"
 
 
 class Column:
-    def __init__(self, cells=None):
+    def __init__(self, column_index: str, cells=None):
+        self.column_index = column_index
         self.cells: list[Cell] = cells or []
 
     def add_cell(self, cell: Cell):
@@ -57,46 +78,44 @@ class Column:
         return self.cells[index]
 
 
+def build_row(row_index: int, col_count: int):
+    row = Row(row_index=row_index)
+
+    for i in range(col_count):
+        new_cell = Cell(row_index=row_index, column_index=i)
+        row.add_cell(new_cell)
+
+    return row
+
+
+def build_column(col_index: int, row_count: int):
+    col = Column(column_index=col_index)
+
+    for i in range(row_count):
+        new_cell = Cell(row_index=i, column_index=col_index)
+        col.add_cell(new_cell)
+
+    return col
+
+
 class Sheet:
-    def __init__(self, cols: list[Column] = [], rows: list[Row] = []):
-        self.cols = cols
+    def __init__(self, dimensions: tuple[int, int]):
+        col_count, row_count = dimensions
+        rows = [build_row(i, col_count=col_count) for i in range(row_count)]
+        cols = [build_column(i, row_count=row_count) for i in range(col_count)]
         self.rows = rows
+        self.cols = cols
+
         self.dependency_graph: dict[str, Cell] = {}
         self.cells_dict = {}
 
-    def get_cell(self, row_index, column_index):
+    def get_cell(self, row_index: int, column_index: int):
         return self.rows[row_index].get_cell(column_index)
 
-    def calculate_all_cells(self):
-        for row in self.rows:
-            for cell in row.cells:
-                cell.value = cell.calculate(self.get_cells_dict())
-
-    def get_cells_dict(self) -> dict[str, Any]:
-        cells_dict = {}
-        for i, column in enumerate(self.columns):
-            for j, cell in enumerate(column.cells):
-                cells_dict[f"{chr(ord('A') + i)}{j + 1}"] = cell.value
-        return cells_dict
-
     def get_string_matrix(self) -> list[list[str]]:
-        return [r.cells for r in self.rows]
+        return [str(r) for r in self.rows]
 
 
-class Transpiler:
-    def transpile_formula(formula):
-        # Replace cell references with Python variables
-        formula = re.sub(r"([A-Z]+)(\d+)", r'cells["\1"][\2].value', formula)
-
-        # Replace Excel functions with Python functions
-        formula = re.sub(r"SUM\((.*)\)", r"sum([\1])", formula)
-        formula = re.sub(r"AVERAGE\((.*)\)", r"sum([\1])/len([\1])", formula)
-
-        return formula
-
-
-# Example usage
-# formula = '=SUM(A1:A10) + AVERAGE(B1:B10) * C1'
-# transpiled = Transpiler.transpile_formula(formula)
-# print(transpiled)
-# Output: cells["A"][1].value+cells["A"][2].value+cells["A"][3].value+cells["A"][4].value+cells["A"][5].value+cells["A"][6].value+cells["A"][7].value+cells["A"][8].value+cells["A"][9].value+cells["A"][10].value+sum([cells["B"][1].value,cells["B"][2].value,cells["B"][3].value,cells["B"][4].value,cells["B"][5].value,cells["B"][6].value,cells["B"][7].value,cells["B"][8].value,cells["B"][9].value,cells["B"][10].value])/len([cells["B"][1].value,cells["B"][2].value,cells["B"][3].value,cells["B"][4].value,cells["B"][5].value,cells["B"][6].value,cells["B"][7].value,cells["B"][8].value,cells["B"][9].value,cells["B"][10].value])*cells["C"][1].value
+if __name__ == "__main__":
+    cell = Cell(column_index=0, row_index=0, formula="if(A1, b2, YY32)")
+    print(cell.dependencies)

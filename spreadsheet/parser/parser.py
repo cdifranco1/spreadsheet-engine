@@ -54,9 +54,6 @@ class TokenType(Enum):
     GTE = auto()
     LTE = auto()
 
-    def comparisons(self):
-        return set(self.GT, self.GTE, self.LTE, self.LT)
-
     COLON = auto()
 
     AND = auto()
@@ -81,7 +78,6 @@ keywords = {
     "or": TokenType.OR,
 }
 
-import pprint
 
 literals = {
     TokenType.TRUE,
@@ -107,13 +103,11 @@ class Token:
 
 
 class Scanner:
-    start = 0
-    current = 0
-
-    tokens = []
-
     def __init__(self, source: str) -> None:
         self.source = source
+        self.tokens = []
+        self.start = 0
+        self.current = 0
 
     def current_char(self):
         return self.source[self.current]
@@ -155,6 +149,23 @@ class Scanner:
                     self.advance()
 
             self.add_token(TokenType.NUMBER)
+
+        # Comparisons
+
+        elif self.current_char() == "=":
+            self.add_token(TokenType.EQUALS)
+        elif self.current_char() == ">":
+            if self.peek() == "=":
+                self.advance()
+                self.add_token(TokenType.GTE)
+            else:
+                self.add_token(TokenType.GT)
+        elif self.current_char() == "<":
+            if self.peek() == "=":
+                self.advance()
+                self.add_token(TokenType.LTE)
+            else:
+                self.add_token(TokenType.LT)
 
         # Groupings
         elif self.current_char() == "(":
@@ -204,7 +215,7 @@ class Scanner:
                     self.add_token(TokenType.CELL_REF)
 
             else:
-                token = self.source[self.start : self.current + 1]
+                token = self.source[self.start : self.current + 1].lower()
                 token_type = (
                     keywords[token] if token in keywords else TokenType.IDENTIFIER
                 )
@@ -219,11 +230,13 @@ class Scanner:
         print([str(token) for token in self.tokens])
 
 
+from abc import abstractmethod
+
+
 class Expr(ABC):
-    pass
-    # @abstractmethod
-    # def eval():
-    #     pass
+    @abstractmethod
+    def eval(self):
+        pass
 
 
 class BinOp(Expr):
@@ -232,35 +245,87 @@ class BinOp(Expr):
         self.left = left
         self.right = right
 
-    # def eval(self):
-    #     if self.op == TokenType.ADDITION:
-    #         return self.left.eval() + self.right.eval()
-    #     elif self.op == TokenType.SUBTRACTION:
-    #         return self.left.eval() - self.right.eval()
-    #     elif self.op == TokenType.MULTIPLICATION:
-    #         return self.left.eval() * self.right.eval
-    #     elif self.op == TokenType.SUBTRACTION:
-    #         return self.left.eval() - self.right.eval
+    def eval(self):
+        left = self.left.eval()
+        right = self.right.eval()
+
+        if self.op == TokenType.ADDITION:
+            return left + right
+        elif self.op == TokenType.SUBTRACTION:
+            return left - right
+        elif self.op == TokenType.MULTIPLICATION:
+            return left * right
+        elif self.op == TokenType.DIVISION:
+            return left / right
+        elif self.op == TokenType.SUBTRACTION:
+            return left - right
+        elif self.op == TokenType.EQUALS:
+            return left == right
+        elif self.op == TokenType.LT:
+            return left < right
+        elif self.op == TokenType.LTE:
+            return left <= right
+        elif self.op == TokenType.GT:
+            return left > right
+        elif self.op == TokenType.GTE:
+            return left >= right
 
     def __repr__(self) -> str:
         return f"BinOp({self.op},{self.left},{self.right}"
 
 
 class UnaryOp(Expr):
-    def __init__(self, operator: Token, operand: Token) -> None:
+    def __init__(self, operator: Token, operand: Expr) -> None:
         self.operator = operator
         self.operand = operand
+
+    def eval(self):
+        if self.operator.type == TokenType.SUBTRACTION:
+            return -self.operand.eval
 
     def __repr__(self) -> str:
         return f"Unary({self.operator}, {self.operand})"
 
 
+literals = {
+    TokenType.TRUE,
+    TokenType.FALSE,
+    TokenType.NUMBER,
+    TokenType.STRING,
+    TokenType.CELL_REF,
+    TokenType.CELL_RANGE,
+}
+
+
 class Literal(Expr):
     def __init__(self, token: Token) -> None:
-        self.value = token
+        self.token = token
+
+    def resolve_cell_ref(self) -> Any:
+        pass
+
+    def resolve_cell_range(self) -> list[Any]:
+        pass
+
+    def eval(self):
+        if self.token.type == TokenType.TRUE:
+            return True
+        elif self.token.type == TokenType.FALSE:
+            return False
+        # TODO: add a FLOAT token type and eval block
+        elif self.token.type == TokenType.NUMBER:
+            return int(self.token.text)
+        elif self.token.type == TokenType.STRING:
+            return self.token.text
+        elif self.token.type == TokenType.CELL_REF:
+            return self.resolve_cell_ref()
+        elif self.token.type == TokenType.CELL_RANGE:
+            return self.resolve_cell_range()
+        else:
+            return None
 
     def __repr__(self) -> str:
-        return f"Literal({self.value})"
+        return f"Literal({self.token.text})"
 
 
 class FunctionCall(Expr):
@@ -385,42 +450,10 @@ class Parser:
             raise Exception("No literal found")
 
 
-import unittest
-
-
-class TestParser(unittest.TestCase):
-    def test_multiplication(self):
-        # input_string = "10 * 300"
-
-        # expected = BinOp(
-        #     TokenType.MULTIPLICATION,
-        #     Literal(Token(TokenType.NUMBER, 10)),
-        #     Literal(Token(TokenType.NUMBER, 300)),
-        # )
-
-        # scanner = Scanner(input_string)
-        # tokens = scanner.scan_tokens()
-
-        # parser = Parser(tokens)
-
-        # result = parser.parse()
-        # print(result)
-        pass
-
-
 if __name__ == "__main__":
-    input_string = "SUM(A3:A25)+SUM(A3:A7)"
-
-    """
-    Result should be:
-        Expression(BinOp(*, BinOp('+', CellRef(A1), 2)
-    """
-    input_string = "IF(A3, A5, 10)"
-    scanner = Scanner(input_string)
-    tokens = scanner.scan_tokens()
-    scanner.print_tokens()
-
-    parser = Parser(tokens)
-
-    result = parser.parse()
-    print(result)
+    while True:
+        _input = input()
+        parse_tree = Parser(Scanner(_input).scan_tokens()).parse()
+        print(parse_tree)
+        result = parse_tree.eval()
+        print(result)

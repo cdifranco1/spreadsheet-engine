@@ -44,7 +44,9 @@ class Cell:
         return None
 
     def eval_formula(self, worksheet: "Sheet") -> Any:
-        tokens = Scanner(self.formula).scan_tokens()
+        scanner = Scanner(self.formula)
+        tokens = scanner.scan_tokens()
+        scanner.print_tokens()
         parse_tree = Parser(tokens).parse()
         dependency_table = {
             ref: worksheet.get_cell(ref).calculate(worksheet=worksheet)
@@ -83,7 +85,9 @@ class Row:
         return self.get_cell(index)
 
     def __str__(self) -> str:
-        values = [str(c._value) if c._value else "" for c in self.cells]
+        values = [
+            str(c.get_value()) if c.get_value() is not None else "" for c in self.cells
+        ]
         return f"[{', '.join(values)}]"
 
 
@@ -100,7 +104,7 @@ class Column:
         return self.cells[index]
 
 
-def build_row(row_index: int, col_count: int):
+def build_row(row_index: int, col_count: int) -> Row:
     row = Row(row_index=row_index)
 
     for i in range(col_count):
@@ -173,30 +177,29 @@ def ref_to_index(ref: str):
         char_index = ord(char) - ord("A") + 1
         addition = char_index * (26 ** (len(col) - i - 1))
         index += addition
-
     return index - 1, int(row) - 1
 
 
 if __name__ == "__main__":
     sheet = Sheet((10, 10))
 
-    sheet.update_cell_formula("A1", "4 + A2")  # should be 213
-    sheet.update_cell_formula("A2", "A5 + B10")  # should be 209
-    sheet.update_cell_formula("A5", "9 + B10")  # should be 109
-    sheet.update_cell_formula("B10", "200 / C5")  # should be 100
-    sheet.update_cell_formula("C5", "2")
+    sheet.update_cell_formula("A1", "IF(AND(2 * 2 < 5, 3 * 3 > 6), 200, 400)")
+    sheet.update_cell_formula("A2", "100 > C5")  # TRUE
+    sheet.update_cell_formula("A5", "200 * 2")  # should be 400
+    sheet.update_cell_formula("B10", "3 ^ C5")  # 9
+    sheet.update_cell_formula("C5", "2")  # == 2
 
     cell = sheet.get_cell("A1")
     print(f"Before calc...")
     print(f"A1 CELL: {cell}")
-    print(f"A2 CELL: {sheet.get_cell('A2')}")
+    # print(f"A2 CELL: {sheet.get_cell('A2')}")
     result = cell.calculate(sheet)
     print(result)
 
     print()
     print(f"After calc...")
     print(f"A1 CELL: {cell}")
-    print(f"A2 CELL: {sheet.get_cell('A2')}")
+    # print(f"A2 CELL: {sheet.get_cell('A2')}")
 
     cells = sheet.get_string_matrix()
     print(cells)
